@@ -125,43 +125,41 @@ main { padding: 0 20px; flex: 1; }
             </header>
             <main>
                 <div class="input-group">
-                    <label>Select Gift Card to Empty</label>
-                    <select id="calc-gift-card" onchange="app.handleCardSelect()">
-                        <option value="">None / Manual Entry</option>
-                        <!-- Cards injected here -->
-                    </select>
+                    <label>Total Bill Amount ($)</label>
+                    <input type="number" id="calc-bill" step="0.01" placeholder="0.00" oninput="app.calculateSplit()">
                 </div>
                 
-                <div class="input-group" id="manual-gift-card-group">
-                    <label>Target Amount to Spend ($)</label>
-                    <input type="number" id="calc-gift-card-amount" step="0.01" placeholder="e.g. 10.00" oninput="app.calculateSplit()">
-                </div>
-
                 <div class="flex-row">
                     <div class="input-group flex-1">
-                        <label>Surcharge / Tip (%)</label>
+                        <label>Global Surcharge / Tip (%)</label>
                         <input type="number" id="calc-surcharge-pct" step="0.1" placeholder="e.g. 1" oninput="app.calculateSplit()">
                     </div>
                     <div class="input-group flex-1">
-                        <label>Surcharge ($)</label>
+                        <label>Global Surcharge ($)</label>
                         <input type="number" id="calc-surcharge-fixed" step="0.01" placeholder="e.g. 0.00" oninput="app.calculateSplit()">
                     </div>
                 </div>
 
+                <div id="payments-list" style="margin-top: 10px; display: flex; flex-direction: column; gap: 15px;">
+                    <!-- Payment cards injected here -->
+                </div>
+
+                <button class="btn-text w-100" style="margin-top: 10px; color: var(--accent); border: 1px dashed var(--accent);" onclick="app.addPayment()">+ Add Payment</button>
+
                 <div class="result-card">
-                    <h2>Tell Cashier to Charge</h2>
-                    <div class="amount" id="result-charge">$0.00</div>
+                    <h2>Remaining Bill</h2>
+                    <div class="amount" id="result-remaining">$0.00</div>
                     <div class="details">
                         <div class="detail-row">
-                            <span>Plus Surcharge:</span>
-                            <span id="res-surcharge">+$0.00</span>
+                            <span>Total Bill:</span>
+                            <span id="res-total-bill">$0.00</span>
                         </div>
-                        <div class="detail-row" style="font-weight: 600; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--border);">
-                            <span>Total (Empties Card):</span>
-                            <span id="res-total">$0.00</span>
+                        <div class="detail-row">
+                            <span>Payments Total:</span>
+                            <span id="res-payments-total">-$0.00</span>
                         </div>
                     </div>
-                    <button class="btn-primary w-100" style="margin-top: 15px;" id="btn-deduct-card" onclick="app.deductFromCard()" disabled>Deduct from Gift Card</button>
+                    <button class="btn-primary w-100" style="margin-top: 15px;" id="btn-process-payments" onclick="app.processAllPayments()" disabled>Process Payments</button>
                 </div>
             </main>
         </div>
@@ -245,6 +243,7 @@ main { padding: 0 20px; flex: 1; }
     <script>
 // Data Management
 let wallets = JSON.parse(localStorage.getItem('restaurant_wallets')) || [];
+let payments = [];
 
 const saveToLocal = () => {
     localStorage.setItem('restaurant_wallets', JSON.stringify(wallets));
@@ -285,7 +284,7 @@ const app = {
             app.updateThemeIcon('dark');
         }
         app.renderWallet();
-        app.renderCardSelect();
+        app.renderPayments();
         app.calculateSplit();
     },
 
@@ -349,7 +348,7 @@ const app = {
         ui.hideModal('add-card-modal');
         e.target.reset();
         app.renderWallet();
-        app.renderCardSelect();
+        app.renderPayments();
     },
 
     openEditCard: (id) => {
@@ -371,7 +370,7 @@ const app = {
             saveToLocal();
             ui.hideModal('edit-card-modal');
             app.renderWallet();
-            app.renderCardSelect();
+            app.renderPayments();
             app.calculateSplit();
         }
     },
@@ -383,95 +382,162 @@ const app = {
             saveToLocal();
             ui.hideModal('edit-card-modal');
             app.renderWallet();
-            app.renderCardSelect();
+            app.renderPayments();
             app.calculateSplit();
         }
     },
 
     // Calculator Functions
-    renderCardSelect: () => {
-        const select = document.getElementById('calc-gift-card');
-        const currentVal = select.value;
-        select.innerHTML = '<option value="">None / Manual Entry</option>';
-        wallets.forEach(card => {
-            select.innerHTML += `<option value="${card.id}">${card.name} (${formatMoney(card.balance)})</option>`;
-        });
-        if (wallets.find(c => c.id === currentVal)) {
-            select.value = currentVal;
-        }
-    },
-
-    handleCardSelect: () => {
-        const cardId = document.getElementById('calc-gift-card').value;
-        const manualAmtInput = document.getElementById('calc-gift-card-amount');
-        if (cardId) {
-            const card = wallets.find(c => c.id === cardId);
-            if (card) {
-                manualAmtInput.value = card.balance.toFixed(2);
-            }
-        }
+    addPayment: () => {
+        payments.push({ id: generateId(), type: 'cash', targetAmount: 0, chargeAmt: 0, surchargeAmt: 0 });
+        app.renderPayments();
         app.calculateSplit();
     },
 
+    removePayment: (id) => {
+        payments = payments.filter(p => p.id !== id);
+        app.renderPayments();
+        app.calculateSplit();
+    },
+
+    handlePaymentMethodChange: (id, method) => {
+        const p = payments.find(p => p.id === id);
+        if (!p) return;
+        p.type = method;
+        if (method !== 'cash') {
+            const card = wallets.find(c => c.id === method);
+            if (card) {
+                p.targetAmount = card.balance;
+            }
+        }
+        app.renderPayments();
+        app.calculateSplit();
+    },
+
+    handlePaymentTargetChange: (id, value) => {
+        const p = payments.find(p => p.id === id);
+        if (p) p.targetAmount = parseFloat(value) || 0;
+        app.calculateSplit();
+    },
+
+    renderPayments: () => {
+        const list = document.getElementById('payments-list');
+        if (!list) return;
+        list.innerHTML = '';
+        payments.forEach(p => {
+            let cardOptions = '<option value="cash" ' + (p.type==='cash'?'selected':'') + '>Cash / Other</option>';
+            wallets.forEach(card => {
+                cardOptions += `<option value="${card.id}" ${p.type===card.id?'selected':''}>${card.name} (${formatMoney(card.balance)})</option>`;
+            });
+
+            const el = document.createElement('div');
+            el.className = 'payment-card';
+            el.style = 'background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 15px; position: relative;';
+            el.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: 600; font-size: 14px;">Payment</span>
+                    <button class="icon-btn text-danger" style="padding: 4px;" onclick="app.removePayment('${p.id}')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    </button>
+                </div>
+                <div class="input-group" style="margin-bottom: 10px;">
+                    <select onchange="app.handlePaymentMethodChange('${p.id}', this.value)">
+                        ${cardOptions}
+                    </select>
+                </div>
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Target Amount to Pay ($)</label>
+                    <input type="number" step="0.01" value="${p.targetAmount ? p.targetAmount.toFixed(2) : ''}" oninput="app.handlePaymentTargetChange('${p.id}', this.value)" placeholder="0.00">
+                </div>
+                <div style="margin-top: 10px; font-size: 13px; color: var(--text-secondary); display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px dashed var(--border);">
+                    <span>Tell Cashier: <strong style="color: var(--text-primary); font-size: 16px;" id="charge-${p.id}">$0.00</strong></span>
+                    <span>Surcharge: <span id="sur-${p.id}">+$0.00</span></span>
+                </div>
+            `;
+            list.appendChild(el);
+        });
+    },
+
     calculateSplit: () => {
+        const totalBill = parseFloat(document.getElementById('calc-bill').value) || 0;
         const surPct = parseFloat(document.getElementById('calc-surcharge-pct').value) || 0;
         const surFixed = parseFloat(document.getElementById('calc-surcharge-fixed').value) || 0;
-        const targetTotal = parseFloat(document.getElementById('calc-gift-card-amount').value) || 0;
-        const cardId = document.getElementById('calc-gift-card').value;
         
-        let chargeAmt = 0;
-        let surchargeAmt = 0;
-        let finalTotal = 0;
+        let totalPaymentsValue = 0;
+        let validGiftCardsToProcess = false;
 
-        if (targetTotal > surFixed) {
-            chargeAmt = (targetTotal - surFixed) / (1 + (surPct / 100));
-            chargeAmt = Math.round(chargeAmt * 100) / 100;
-            surchargeAmt = (chargeAmt * (surPct / 100)) + surFixed;
-            surchargeAmt = Math.round(surchargeAmt * 100) / 100;
-            finalTotal = chargeAmt + surchargeAmt;
-        }
+        payments.forEach(p => {
+            let chargeAmt = 0;
+            let surchargeAmt = 0;
+            let finalTotal = 0;
 
-        document.getElementById('result-charge').textContent = formatMoney(chargeAmt);
-        document.getElementById('res-surcharge').textContent = '+' + formatMoney(surchargeAmt);
-        document.getElementById('res-total').textContent = formatMoney(finalTotal);
+            if (p.targetAmount > surFixed) {
+                chargeAmt = (p.targetAmount - surFixed) / (1 + (surPct / 100));
+                chargeAmt = Math.round(chargeAmt * 100) / 100;
+                surchargeAmt = (chargeAmt * (surPct / 100)) + surFixed;
+                surchargeAmt = Math.round(surchargeAmt * 100) / 100;
+                finalTotal = chargeAmt + surchargeAmt;
+            }
 
-        const deductBtn = document.getElementById('btn-deduct-card');
-        if (cardId && finalTotal > 0) {
-            deductBtn.disabled = false;
-            deductBtn.textContent = `Deduct $${finalTotal.toFixed(2)} from Card`;
+            p.chargeAmt = chargeAmt;
+            p.surchargeAmt = surchargeAmt;
+            
+            const chargeEl = document.getElementById(`charge-${p.id}`);
+            if (chargeEl) chargeEl.textContent = formatMoney(chargeAmt);
+            
+            const surEl = document.getElementById(`sur-${p.id}`);
+            if (surEl) surEl.textContent = '+' + formatMoney(surchargeAmt);
+
+            totalPaymentsValue += finalTotal;
+            
+            if (p.type !== 'cash' && finalTotal > 0) validGiftCardsToProcess = true;
+        });
+
+        const remainingBill = Math.max(0, totalBill - totalPaymentsValue);
+
+        document.getElementById('res-total-bill').textContent = formatMoney(totalBill);
+        document.getElementById('res-payments-total').textContent = '-' + formatMoney(totalPaymentsValue);
+        document.getElementById('result-remaining').textContent = formatMoney(remainingBill);
+
+        const processBtn = document.getElementById('btn-process-payments');
+        if (validGiftCardsToProcess) {
+            processBtn.disabled = false;
+            processBtn.textContent = 'Deduct Used Gift Cards';
         } else {
-            deductBtn.disabled = true;
-            deductBtn.textContent = `Deduct from Gift Card`;
+            processBtn.disabled = true;
+            processBtn.textContent = 'Deduct Used Gift Cards';
         }
     },
 
-    deductFromCard: () => {
-        const cardId = document.getElementById('calc-gift-card').value;
-        if (!cardId) return;
-        
-        const targetTotal = parseFloat(document.getElementById('calc-gift-card-amount').value) || 0;
-        const surPct = parseFloat(document.getElementById('calc-surcharge-pct').value) || 0;
-        const surFixed = parseFloat(document.getElementById('calc-surcharge-fixed').value) || 0;
-        
-        let chargeAmt = (targetTotal - surFixed) / (1 + (surPct / 100));
-        chargeAmt = Math.round(chargeAmt * 100) / 100;
-        let surchargeAmt = Math.round(((chargeAmt * (surPct / 100)) + surFixed) * 100) / 100;
-        let finalTotal = chargeAmt + surchargeAmt;
+    processAllPayments: () => {
+        let affectedCards = [];
+        payments.forEach(p => {
+            if (p.type !== 'cash') {
+                const finalTotal = p.chargeAmt + p.surchargeAmt;
+                if (finalTotal > 0) {
+                    affectedCards.push({ cardId: p.type, amount: finalTotal });
+                }
+            }
+        });
 
-        const card = wallets.find(c => c.id === cardId);
-        
-        if (finalTotal > 0 && confirm(`Deduct $${finalTotal.toFixed(2)} from ${card.name}?`)) {
-            card.balance -= finalTotal;
-            saveToLocal();
-            
-            document.getElementById('calc-surcharge-pct').value = '';
-            document.getElementById('calc-surcharge-fixed').value = '';
-            document.getElementById('calc-gift-card').value = '';
-            document.getElementById('calc-gift-card-amount').value = '';
-            
-            app.renderCardSelect();
-            app.calculateSplit();
-            alert(`Successfully deducted $${finalTotal.toFixed(2)}. New balance is $${card.balance.toFixed(2)}.`);
+        if (affectedCards.length > 0) {
+            if (confirm(`This will deduct balances from ${affectedCards.length} gift card(s). Proceed?`)) {
+                affectedCards.forEach(ac => {
+                    const card = wallets.find(c => c.id === ac.cardId);
+                    if (card) {
+                        card.balance -= ac.amount;
+                    }
+                });
+                saveToLocal();
+                
+                // Clear payments
+                payments = [];
+                document.getElementById('calc-bill').value = '';
+                app.renderPayments();
+                app.renderWallet();
+                app.calculateSplit();
+                alert('Gift cards have been updated.');
+            }
         }
     }
 };
