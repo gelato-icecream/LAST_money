@@ -8,6 +8,7 @@
     <meta name="theme-color" content="#0f172a">
     <title>Restaurant Split & Wallet</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <style>
 :root {
     --bg-dark: #0f172a;
@@ -183,6 +184,8 @@ main { padding: 0 20px; flex: 1; }
         </div>
 
         <!-- Modals -->
+        <datalist id="wallet-groups"></datalist>
+
         <div id="add-card-modal" class="modal-overlay">
             <div class="modal">
                 <h2>Add Gift Card</h2>
@@ -190,6 +193,10 @@ main { padding: 0 20px; flex: 1; }
                     <div class="input-group">
                         <label>Card Name / Restaurant</label>
                         <input type="text" id="card-name" required placeholder="e.g. Starbucks, McDonalds">
+                    </div>
+                    <div class="input-group">
+                        <label>Group (Optional)</label>
+                        <input type="text" id="card-group" list="wallet-groups" placeholder="e.g. Food">
                     </div>
                     <div class="input-group">
                         <label>Current Balance ($)</label>
@@ -211,6 +218,10 @@ main { padding: 0 20px; flex: 1; }
                     <div class="input-group">
                         <label>Card Name / Restaurant</label>
                         <input type="text" id="edit-card-name" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Group (Optional)</label>
+                        <input type="text" id="edit-card-group" list="wallet-groups" placeholder="e.g. Food">
                     </div>
                     <div class="input-group">
                         <label>Current Balance ($)</label>
@@ -313,26 +324,86 @@ const app = {
     renderWallet: () => {
         const list = document.getElementById('cards-list');
         list.innerHTML = '';
+        
+        const datalist = document.getElementById('wallet-groups');
+        if (datalist) {
+            const uniqueGroups = [...new Set(wallets.map(w => w.group).filter(Boolean))];
+            datalist.innerHTML = uniqueGroups.map(g => `<option value="${g}"></option>`).join('');
+        }
+
         if (wallets.length === 0) {
             list.innerHTML = `<div class="empty-state"><p>No gift cards added yet.</p></div>`;
             return;
         }
 
-        wallets.forEach(card => {
-            const el = document.createElement('div');
-            el.className = 'wallet-card';
-            el.innerHTML = `
-                <div class="wallet-card-info">
-                    <h3>${card.name}</h3>
-                    <div class="wallet-card-balance">${formatMoney(card.balance)}</div>
-                </div>
-                <div class="wallet-card-actions">
-                    <button class="icon-btn" onclick="app.openEditCard('${card.id}')" style="background: rgba(255,255,255,0.2); color: #fff;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    </button>
-                </div>
-            `;
-            list.appendChild(el);
+        const grouped = wallets.reduce((acc, card) => {
+            const g = card.group || 'Ungrouped';
+            if(!acc[g]) acc[g] = [];
+            acc[g].push(card);
+            return acc;
+        }, {});
+
+        Object.keys(grouped).sort().forEach(groupName => {
+            const groupWrapper = document.createElement('div');
+            groupWrapper.style.marginBottom = '20px';
+            
+            if (groupName !== 'Ungrouped' || Object.keys(grouped).length > 1) {
+                const header = document.createElement('h3');
+                header.textContent = groupName;
+                header.style.marginBottom = '10px';
+                header.style.fontSize = '14px';
+                header.style.color = 'var(--text-secondary)';
+                header.style.textTransform = 'uppercase';
+                header.style.letterSpacing = '0.5px';
+                groupWrapper.appendChild(header);
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'card-grid wallet-group';
+            grid.dataset.group = groupName === 'Ungrouped' ? '' : groupName;
+            
+            grouped[groupName].forEach(card => {
+                const el = document.createElement('div');
+                el.className = 'wallet-card';
+                el.dataset.id = card.id;
+                el.style.cursor = 'grab';
+                el.innerHTML = `
+                    <div class="wallet-card-info">
+                        <h3>${card.name}</h3>
+                        <div class="wallet-card-balance">${formatMoney(card.balance)}</div>
+                    </div>
+                    <div class="wallet-card-actions">
+                        <button class="icon-btn" onclick="app.openEditCard('${card.id}')" style="background: rgba(255,255,255,0.2); color: #fff;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                    </div>
+                `;
+                grid.appendChild(el);
+            });
+            groupWrapper.appendChild(grid);
+            list.appendChild(groupWrapper);
+
+            Sortable.create(grid, {
+                group: 'wallet-cards',
+                animation: 150,
+                onEnd: () => {
+                    const newWallets = [];
+                    document.querySelectorAll('.wallet-group').forEach(gEl => {
+                        const gName = gEl.dataset.group;
+                        gEl.querySelectorAll('.wallet-card').forEach(cEl => {
+                            const id = cEl.dataset.id;
+                            const card = wallets.find(w => w.id === id);
+                            if (card) {
+                                card.group = gName || '';
+                                newWallets.push(card);
+                            }
+                        });
+                    });
+                    wallets = newWallets;
+                    saveToLocal();
+                    app.renderWallet();
+                }
+            });
         });
     },
 
@@ -341,6 +412,7 @@ const app = {
         const card = {
             id: generateId(),
             name: document.getElementById('card-name').value,
+            group: document.getElementById('card-group').value,
             balance: parseFloat(document.getElementById('card-balance').value) || 0
         };
         wallets.push(card);
@@ -356,6 +428,7 @@ const app = {
         if (!card) return;
         document.getElementById('edit-card-id').value = card.id;
         document.getElementById('edit-card-name').value = card.name;
+        document.getElementById('edit-card-group').value = card.group || '';
         document.getElementById('edit-card-balance').value = card.balance;
         ui.showModal('edit-card-modal');
     },
@@ -366,6 +439,7 @@ const app = {
         const card = wallets.find(c => c.id === id);
         if (card) {
             card.name = document.getElementById('edit-card-name').value;
+            card.group = document.getElementById('edit-card-group').value;
             card.balance = parseFloat(document.getElementById('edit-card-balance').value) || 0;
             saveToLocal();
             ui.hideModal('edit-card-modal');
