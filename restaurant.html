@@ -386,6 +386,8 @@ const app = {
             Sortable.create(grid, {
                 group: 'wallet-cards',
                 animation: 150,
+                delay: 200,
+                delayOnTouchOnly: true,
                 onEnd: () => {
                     const newWallets = [];
                     document.querySelectorAll('.wallet-group').forEach(gEl => {
