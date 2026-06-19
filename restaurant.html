@@ -547,7 +547,7 @@ const app = {
 
             if (p.targetAmount > surFixed) {
                 chargeAmt = (p.targetAmount - surFixed) / (1 + (surPct / 100));
-                chargeAmt = Math.round(chargeAmt * 100) / 100;
+                chargeAmt = Math.floor(chargeAmt * 100) / 100;
                 surchargeAmt = (chargeAmt * (surPct / 100)) + surFixed;
                 surchargeAmt = Math.round(surchargeAmt * 100) / 100;
                 finalTotal = chargeAmt + surchargeAmt;
